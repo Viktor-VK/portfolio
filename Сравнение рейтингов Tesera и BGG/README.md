@@ -59,6 +59,7 @@ CSV в формате для Excel и Power BI с русской локалью:
 | Файл | Что делает |
 |---|---|
 | `collect.py` | сбор топа в узкую таблицу |
+| `collect_relations.py` | досбор связей «дополнение -> основная игра» для текущего среза |
 | `make_wide.py` | узкие таблицы двух выборок -> широкая, одна строка на игру |
 | `01_анализ_рейтингов.ipynb` | анализ: эффект отбора, год выпуска, жанры, дополнения, суб-рейтинги, издатели |
 | `analysis.py` | те же расчёты -> `results/tesera-bgg.json` для страницы на сайте |
@@ -71,6 +72,7 @@ CSV в формате для Excel и Power BI с русской локалью:
 ```bash
 python collect.py --limit 500 --out data/tesera_top500_long.csv
 python collect.py --limit 500 --sort=-ratinggeekbgg --out data/bgg_top500_long.csv
+python collect_relations.py
 python make_wide.py
 python analysis.py
 ```

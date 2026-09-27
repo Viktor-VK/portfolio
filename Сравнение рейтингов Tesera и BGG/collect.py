@@ -192,7 +192,21 @@ def parse_html(html):
         result = li.get_text(" ", strip=True).split("—")[-1].strip()
         out.append(("tesera", "awards", "award", a.get("title") or a.get_text(strip=True), result, i,
                     num(year.get_text()) if year else None, None, "year"))
+
+    # связанные игры: dim_l1 = тип связи («исходная игра», «в одной серии»...), value_text = alias связанной игры
+    for i, (kind, alias) in enumerate(parse_relations(soup)):
+        out.append(("tesera", "relations", "related_game", kind, None, i, None, alias, None))
     return out
+
+
+def parse_relations(soup):
+    """Блок «Связанные игры»: список (тип связи, alias связанной игры)."""
+    rel = []
+    for box in soup.select("div.gameslinked"):
+        kind, link = box.select_one("div.kind"), box.select_one("div.text h3 a")
+        if kind and link:
+            rel.append((kind.get_text(strip=True), link["href"].strip("/").split("/")[-1]))
+    return rel
 
 
 SORT_FIELD = {"-ratingn10": "n10Rating", "-ratinggeekbgg": "bggGeekRating"}
