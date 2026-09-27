@@ -67,7 +67,15 @@ for k, s in [("tesera_top", f[f.in_t]), ("bgg_top", f[f.in_b])]:
     additions[k] = {"base": r2(b.mean()), "additions": r2(a.mean()), "n_base": int(len(b)), "n_add": int(len(a)),
                     "p": float(f"{stats.mannwhitneyu(b, a).pvalue:.2g}")}
 
-# 5. Издатель: Hobby World
+# 5. Суб-рейтинги Tesera: связь с итоговой оценкой
+SUB = {"tesera_gameplay": "Геймплей", "tesera_depth": "Глубина",
+       "tesera_originality": "Оригинальность", "tesera_implementation": "Реализация"}
+sr = f.dropna(subset=list(SUB))
+subratings = {"n": int(len(sr)), "items": [
+    {"name": name, "mean": r2(sr[col].mean()), "rho": r2(stats.spearmanr(sr[col], sr.tesera_avg_rating).correlation)}
+    for col, name in SUB.items()]}
+
+# 6. Издатель: Hobby World
 pub = w.assign(p=w.tesera_publisher.fillna("").str.split(", ")).explode("p")
 pub = pub[pub.p != ""]
 top_publishers = [{"publisher": p, "games": int(n)} for p, n in pub.p.value_counts().head(6).items()]
@@ -87,6 +95,7 @@ result = {
              "p": {k: float(f"{v.pvalue:.2g}") for k, v in year_rho.items()}},
     "genre": by_genre,
     "additions": additions,
+    "subratings": subratings,
     "publisher": {"top": top_publishers, "hw_demand": hw_demand,
                   "median_ratio_all": r2(w.buy_per_sell.median())},
 }
