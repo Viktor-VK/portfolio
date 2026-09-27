@@ -6,3 +6,4 @@ RKF_raw/
 # служебные файлы
 .ipynb_checkpoints/
 .DS_Store
+__pycache__/
