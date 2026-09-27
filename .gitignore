@@ -7,3 +7,6 @@ RKF_raw/
 .ipynb_checkpoints/
 .DS_Store
 __pycache__/
+
+# черновые ноутбуки
+sandbox_*.ipynb
