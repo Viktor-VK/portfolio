@@ -12,6 +12,7 @@ import pandas as pd
 from scipy import stats
 
 from csv_format import read_csv
+from wordcloud_layout import HEIGHT, WIDTH, layout, lean
 
 MIN_VOTES_TESERA = 20
 MIN_VOTES_BGG = 100
@@ -60,6 +61,40 @@ ge = ge[ge.genre != ""]
 by_genre = (ge.groupby("genre")["diff"].agg(["mean", "count"]).query("count >= 10").sort_values("mean"))
 by_genre = [{"genre": g, "mean": r2(r["mean"]), "n": int(r["count"])} for g, r in by_genre.iterrows()]
 
+# 3b. Темы (сеттинги) в топ-200 каждой площадки: частоты и облака в общем масштабе
+THEME_TOP = 200
+
+
+def theme_counts(col):
+    top = w[w[col] <= THEME_TOP]
+    cnt = (top.tesera_theme.dropna().str.split(",").explode().str.strip().value_counts())
+    return cnt.to_dict(), int(len(top)), int(top.tesera_theme.notna().sum())
+
+
+cnt_t, n_t, th_t = theme_counts("rank_in_tesera_top")
+cnt_b, n_b, th_b = theme_counts("rank_in_bgg_top")
+max_c = max(max(cnt_t.values()), max(cnt_b.values()))
+all_themes = sorted(set(cnt_t) | set(cnt_b))
+theme_rows = sorted(({"theme": k, "tesera": int(cnt_t.get(k, 0)), "bgg": int(cnt_b.get(k, 0)),
+                      "diff": int(cnt_t.get(k, 0) - cnt_b.get(k, 0))} for k in all_themes),
+                    key=lambda r: -r["diff"])
+
+
+def cloud(counts, is_tesera):
+    return [{"word": wd, "count": int(c), "other": int((cnt_b if is_tesera else cnt_t).get(wd, 0)), "x": x, "y": y,
+             "fs": fs, "lean": lean(*((c, cnt_b.get(wd, 0)) if is_tesera else (cnt_t.get(wd, 0), c)))}
+            for wd, c, x, y, fs in layout(counts, max_c)]
+
+
+themes = {
+    "top_n": THEME_TOP, "width": WIDTH, "height": HEIGHT,
+    "tesera": {"games": n_t, "with_theme": th_t, "cloud": cloud(cnt_t, True)},
+    "bgg": {"games": n_b, "with_theme": th_b, "cloud": cloud(cnt_b, False)},
+    "more_tesera": [r for r in theme_rows if r["diff"] >= 3][:5],
+    "more_bgg": sorted([r for r in theme_rows if r["diff"] <= -3], key=lambda r: r["diff"])[:5],
+    "table": theme_rows,
+}
+
 # 4. Дополнения vs базовые игры
 additions = {}
 for k, s in [("tesera_top", f[f.in_t]), ("bgg_top", f[f.in_b])]:
@@ -102,6 +137,7 @@ result = {
     "year": {"by_period": by_period, "rho": {k: r2(v.correlation) for k, v in year_rho.items()},
              "p": {k: float(f"{v.pvalue:.2g}") for k, v in year_rho.items()}},
     "genre": by_genre,
+    "themes": themes,
     "additions": additions,
     "subratings": subratings,
     "publisher": {"top": top_publishers, "hw_demand": hw_demand,
