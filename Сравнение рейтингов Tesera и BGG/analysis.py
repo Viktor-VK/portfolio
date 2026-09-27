@@ -67,13 +67,21 @@ for k, s in [("tesera_top", f[f.in_t]), ("bgg_top", f[f.in_b])]:
     additions[k] = {"base": r2(b.mean()), "additions": r2(a.mean()), "n_base": int(len(b)), "n_add": int(len(a)),
                     "p": float(f"{stats.mannwhitneyu(b, a).pvalue:.2g}")}
 
-# 5. Суб-рейтинги Tesera: связь с итоговой оценкой
+# 5. Суб-рейтинги Tesera. Итоговая оценка = среднее четырёх суб-рейтингов, поэтому корреляция
+# суб-рейтинга с итогом завышена по построению; смотрим связь с тремя ОСТАЛЬНЫМИ суб-рейтингами.
 SUB = {"tesera_gameplay": "Геймплей", "tesera_depth": "Глубина",
        "tesera_originality": "Оригинальность", "tesera_implementation": "Реализация"}
 sr = f.dropna(subset=list(SUB))
-subratings = {"n": int(len(sr)), "items": [
-    {"name": name, "mean": r2(sr[col].mean()), "rho": r2(stats.spearmanr(sr[col], sr.tesera_avg_rating).correlation)}
-    for col, name in SUB.items()]}
+mean4 = sr[list(SUB)].mean(axis=1)
+pair = sr[list(SUB)].corr(method="spearman").where(~np.eye(len(SUB), dtype=bool)).stack()
+subratings = {
+    "n": int(len(sr)),
+    "avg_equals_mean_share": round(float(((mean4 - sr.tesera_avg_rating).abs() <= 0.0101).mean()), 3),
+    "pair_rho_min": r2(pair.min()), "pair_rho_max": r2(pair.max()),
+    "items": [{"name": name, "mean": r2(sr[col].mean()),
+               "rho_others": r2(stats.spearmanr(sr[col], sr[[c for c in SUB if c != col]].mean(axis=1)).correlation)}
+              for col, name in SUB.items()],
+}
 
 # 6. Издатель: Hobby World
 pub = w.assign(p=w.tesera_publisher.fillna("").str.split(", ")).explode("p")

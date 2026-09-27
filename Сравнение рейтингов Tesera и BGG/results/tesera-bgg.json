@@ -4760,26 +4760,29 @@
  },
  "subratings": {
   "n": 661,
+  "avg_equals_mean_share": 0.995,
+  "pair_rho_min": 0.53,
+  "pair_rho_max": 0.77,
   "items": [
    {
     "name": "Геймплей",
     "mean": 8.1,
-    "rho": 0.89
+    "rho_others": 0.83
    },
    {
     "name": "Глубина",
     "mean": 7.8,
-    "rho": 0.9
+    "rho_others": 0.77
    },
    {
     "name": "Оригинальность",
     "mean": 7.91,
-    "rho": 0.84
+    "rho_others": 0.73
    },
    {
     "name": "Реализация",
     "mean": 8.21,
-    "rho": 0.78
+    "rho_others": 0.64
    }
   ]
  },
