@@ -27,6 +27,15 @@ def r(x, d=4):
     return round(float(x), d)
 
 
+def example_store(seg):
+    """Пример для схемы сборки сегмента: первая эконом-точка, сегмент которой не менялся при слиянии."""
+    cand = seg[(seg.price_level == "эконом") & (seg.segment == seg.segment_raw)].sort_values("TradePointId")
+    x = (cand if len(cand) else seg.sort_values("TradePointId")).iloc[0]
+    return {"code": x.TradePointCode, "size_cluster": x.size_money_cluster, "size_level": x.size_level,
+            "price_cluster": x.price_cluster, "price_level": x.price_level, "assort_cluster": x.assortment_cluster,
+            "profile": x.assortment_profile, "segment": x.segment}
+
+
 def export_clustering(con):
     seg = con.sql("""
         SELECT s.*, a.archetype
@@ -89,6 +98,9 @@ def export_clustering(con):
                    "n": [int(info.loc[c, "n_stores"]) for c in clusters],
                    "index": [[r(v, 2) for v in row] for row in pivot.to_numpy()]},
         "k_selection": k_selection,
+        "size_clusters": [{"cluster": c, "n": int(len(g)), "level": g.size_level.iloc[0], "revenue": r(g.revenue.median(), 0)}
+                          for c, g in seg.sort_values("size_money_cluster").groupby("size_money_cluster")],
+        "example": example_store(seg),
         "segments_raw": int(seg.segment_raw.nunique()),
         "merges": [{"from": x.from_segment, "n": int(x.n_stores), "to": x.to_segment}
                    for x in con.sql("SELECT * FROM results.segment_merges").df().itertuples()],
