@@ -121,12 +121,21 @@ def export_clustering(con):
 HIERARCHY_EXAMPLES = [("Ибупрофен", "таблетки"), ("Ибупрофен", "суппозитории"), ("Амлодипин", "таблетки"),
                       ("Подгузники и пеленки", "подгузники"), ("Витаминно-минеральные комплексы", "саше")]
 SUBCATEGORY_SHORT = {"Противовоспалительные и противоревматические": "Противовоспалительные"}
+PACK_BINS = [(1, "1"), (4, "2-4"), (8, "5-8"), (12, "9-12"), (20, "13-20"), (30, "21-30"),
+             (50, "31-50"), (100, "51-100"), (float("inf"), "100+")]
+
+
+def pack_bin(doses):
+    """Категория фасовки по числу доз в упаковке (те же границы, что в ноутбуках); у нештучных форм - None."""
+    if doses is None or pd.isna(doses):
+        return None
+    return next(label for upper, label in PACK_BINS if doses <= upper)
 
 
 def hierarchy_examples(con):
     p = con.sql("""
         SELECT p.apCode, p.category, p.subcategory, p.mnn, p.form_group, p.form_name, p.name, p.trade_name,
-               p.dosage, p.pack_qty, p.is_own_brand, COALESCE(s.revenue, 0) AS revenue
+               p.dosage, p.pack_qty, p.doses_in_pack, p.is_own_brand, COALESCE(s.revenue, 0) AS revenue
         FROM pharmacy.products p
         LEFT JOIN (SELECT apCode, SUM(Sum_Fact) AS revenue FROM pharmacy.cheques GROUP BY 1) s USING (apCode)
         WHERE p.product_class <> 'Нетоварные позиции'
@@ -140,10 +149,15 @@ def hierarchy_examples(con):
         # пример - самый продаваемый товар юнита обычного бренда (собственная марка сети выглядела бы как заглушка)
         brands = g[~g.is_own_brand]
         top = (brands if len(brands) else g).sort_values("revenue", ascending=False).iloc[0]
+        # юнит штучных форм делится ещё и по объёму пачки (как в ноутбуке скоринга)
+        pack = pack_bin(top.doses_in_pack)
+        if pack:
+            g = g[g.doses_in_pack.map(pack_bin) == pack]
         if pd.notna(top.mnn):
-            unit, product = f"{key}, {form}", f"{top.trade_name} {top.dosage} №{int(top.pack_qty)}".replace("  ", " ")
+            unit = f"{key}, {form}" + (f", {pack} шт." if pack else "")
+            product = f"{top.trade_name} {top.dosage} №{int(top.pack_qty)}".replace("  ", " ")
         else:
-            unit = form[0].upper() + form[1:] if form.lower() in key.lower() else f"{key}, {form}"
+            unit = (form[0].upper() + form[1:] if form.lower() in key.lower() else f"{key}, {form}") + (f", {pack} шт." if pack else "")
             product = top["name"].split(" (")[0] + (f" №{int(top.pack_qty)}" if top.pack_qty > 1 else "")
         rows.append({"category": top.category, "subcategory": SUBCATEGORY_SHORT.get(top.subcategory, top.subcategory),
                      "unit": unit, "n": int(len(g)), "product": product})
@@ -160,6 +174,12 @@ def export_scoring(con):
 
     exp = con.sql("SELECT * FROM results.scoring_experiment").df()
     prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
+    fr = con.sql("SELECT * FROM results.scoring_frontier ORDER BY method, lam").df()
+    # прибыль на отложенных неделях при остатках как у действующей матрицы - интерполяция по кривой
+    budget = {}
+    for m, g in fr.groupby("method"):
+        g = g.sort_values("d_stock")
+        budget[m] = r(np.interp(0, g.d_stock, g.d_profit_test), 0)
 
     return {
         "meta": {"segments": int(units.segment.nunique()), "units": int(units.Unit.nunique()),
@@ -172,6 +192,9 @@ def export_scoring(con):
                       "d_profit": r(x.diff_profit, 0), "d_positions": int(round(x.diff_positions)),
                       "selected": bool(x.selected)} for x in v.itertuples()],
         "hierarchy": hierarchy_examples(con),
+        "frontier": {m: [[r(x.d_stock, 0), r(x.d_profit_test, 0), r(x.d_profit_train, 0), r(x.lam, 3), bool(x.selected)]
+                          for x in g.itertuples()] for m, g in fr.groupby("method")},
+        "budget_profit": budget,
         "experiment": [{"method": x.method, "groups": int(x.groups), "variant": x.variant,
                         "positions": int(round(x.positions)), "d_stock": r(x.d_stock, 0),
                         "d_profit_train": r(x.d_profit_train, 0), "d_revenue_test": r(x.d_revenue_test, 0),
