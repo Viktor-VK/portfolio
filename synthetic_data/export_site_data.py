@@ -175,11 +175,6 @@ def export_scoring(con):
     exp = con.sql("SELECT * FROM results.scoring_experiment").df()
     prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
     fr = con.sql("SELECT * FROM results.scoring_frontier ORDER BY method, lam").df()
-    # прибыль на отложенных неделях при остатках как у действующей матрицы - интерполяция по кривой
-    budget = {}
-    for m, g in fr.groupby("method"):
-        g = g.sort_values("d_stock")
-        budget[m] = r(np.interp(0, g.d_stock, g.d_profit_test), 0)
 
     return {
         "meta": {"segments": int(units.segment.nunique()), "units": int(units.Unit.nunique()),
@@ -192,13 +187,15 @@ def export_scoring(con):
                       "d_profit": r(x.diff_profit, 0), "d_positions": int(round(x.diff_positions)),
                       "selected": bool(x.selected)} for x in v.itertuples()],
         "hierarchy": hierarchy_examples(con),
-        "frontier": {m: [[r(x.d_stock, 0), r(x.d_profit_test, 0), r(x.d_profit_train, 0), r(x.lam, 3), bool(x.selected)]
+        # кривая способа по сетке строгости: [Δ остатки, Δ прибыль на отложенных неделях, Δ прибыль на обучении, λ]
+        "frontier": {m: [[r(x.d_stock, 0), r(x.d_profit_test, 0), r(x.d_profit_train, 0), r(x.lam, 3)]
                           for x in g.itertuples()] for m, g in fr.groupby("method")},
-        "budget_profit": budget,
-        "experiment": [{"method": x.method, "groups": int(x.groups), "variant": x.variant,
-                        "positions": int(round(x.positions)), "d_stock": r(x.d_stock, 0),
-                        "d_profit_train": r(x.d_profit_train, 0), "d_revenue_test": r(x.d_revenue_test, 0),
-                        "d_profit_test": r(x.d_profit_test, 0), "effect": r(x.effect, 0)} for x in exp.itertuples()],
+        # две точки пересечения кривой с нулевыми осями, посчитанные точно
+        "experiment": [{"method": x.method, "groups": int(x.groups),
+                        "d_stock_zero_profit": r(x.d_stock_zero_profit, 0), "positions_zero_profit": int(round(x.positions_zero_profit)),
+                        "lam_zero_profit": r(x.lam_zero_profit, 3),
+                        "d_profit_zero_stock": r(x.d_profit_zero_stock, 0), "lam_zero_stock": r(x.lam_zero_stock, 3)}
+                       for x in exp.itertuples()],
         "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4), x.Status] for i, x in enumerate(u.itertuples())],
         "classes": [{"segment": s, "A": int(x.get("A", 0)), "B": int(x.get("B", 0)), "C": int(x.get("C", 0))}
                     for s, x in classes.loc[width.segment].iterrows()],
