@@ -30,7 +30,7 @@ SCALES = {
     "dev": dict(n_drugs=700, n_non_drugs=297, n_stores=40, days=3, cheque_frac=0.04, stock_max_rows=3000,
                 el_stores=5, el_products=8, el_days=30),
     # full: объём для финальных прогонов и графиков
-    "full": dict(n_drugs=2500, n_non_drugs=700, n_stores=260, days=28, cheque_frac=0.2, stock_max_rows=None,
+    "full": dict(n_drugs=2500, n_non_drugs=700, n_stores=260, days=56, cheque_frac=0.2, stock_max_rows=None,
                  el_stores=36, el_products=None, el_days=92),
 }
 

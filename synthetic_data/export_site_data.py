@@ -120,19 +120,27 @@ def export_scoring(con):
     u = units[units.segment == biggest].sort_values("cum_share").reset_index(drop=True)
     classes = units.groupby("segment").Status.value_counts().unstack().fillna(0)
 
+    exp = con.sql("SELECT * FROM results.scoring_experiment").df()
+    prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
+
     return {
         "meta": {"segments": int(units.segment.nunique()), "units": int(units.Unit.nunique()),
-                 "matrix_fact": int(v.loc[v.variant == "факт", "positions"].iloc[0]),
+                 "matrix_fact": int(round(v.loc[v.variant == "факт", "positions"].iloc[0])),
                  "pareto_segment": biggest, "pareto_units": int(len(u))},
+        "params": {k: r(prm[k], 4) for k in prm.index},
         "variants": [{"variant": x.variant, "stock": r(x.stock_rub, 0), "revenue": r(x.revenue, 0),
-                      "profit": r(x.profit, 0), "positions": int(x.positions),
+                      "profit": r(x.profit, 0), "positions": int(round(x.positions)),
                       "d_stock": r(x.diff_stock_rub, 0), "d_revenue": r(x.diff_revenue, 0),
-                      "d_profit": r(x.diff_profit, 0), "d_positions": int(x.diff_positions),
+                      "d_profit": r(x.diff_profit, 0), "d_positions": int(round(x.diff_positions)),
                       "selected": bool(x.selected)} for x in v.itertuples()],
+        "experiment": [{"method": x.method, "groups": int(x.groups), "variant": x.variant,
+                        "positions": int(round(x.positions)), "d_stock": r(x.d_stock, 0),
+                        "d_profit_train": r(x.d_profit_train, 0), "d_revenue_test": r(x.d_revenue_test, 0),
+                        "d_profit_test": r(x.d_profit_test, 0), "effect": r(x.effect, 0)} for x in exp.itertuples()],
         "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4), x.Status] for i, x in enumerate(u.itertuples())],
         "classes": [{"segment": s, "A": int(x.get("A", 0)), "B": int(x.get("B", 0)), "C": int(x.get("C", 0))}
                     for s, x in classes.loc[width.segment].iterrows()],
-        "width": [{"segment": x.segment, "n_stores": int(x.n_stores), "fact": int(x.fact), "new": int(x.new)}
+        "width": [{"segment": x.segment, "n_stores": int(x.n_stores), "fact": int(round(x.fact)), "new": int(x.new)}
                   for x in width.itertuples()],
     }
 
