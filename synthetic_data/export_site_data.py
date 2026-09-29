@@ -59,6 +59,13 @@ def export_clustering(con):
     ).sort_values("revenue", ascending=False)
     ct = pd.crosstab(seg.segment, seg.archetype).loc[summary.index]
     quality = con.sql("SELECT * FROM results.clustering_quality").df().set_index("metric").ari
+    kdiag = con.sql("SELECT * FROM results.clustering_k_selection ORDER BY clustering, k").df()
+    k_selection = {
+        name: {"k": g.k.astype(int).tolist(), "cost": [r(x, 3) for x in g.merge_cost],
+               "silhouette": [r(x, 3) for x in g.silhouette], "chosen": int(g.loc[g.chosen, "k"].iloc[0]),
+               "k_min": int(g.k_min.iloc[0]), "k_max": int(g.k_max.iloc[0])}
+        for name, g in kdiag.groupby("clustering")
+    }
 
     return {
         "meta": {
@@ -81,6 +88,7 @@ def export_clustering(con):
                    "profiles": [info.loc[c, "profile"] for c in clusters],
                    "n": [int(info.loc[c, "n_stores"]) for c in clusters],
                    "index": [[r(v, 2) for v in row] for row in pivot.to_numpy()]},
+        "k_selection": k_selection,
         "segments": [{"segment": s, "n": int(x.n), "square": r(x.square, 0), "revenue": r(x.revenue, 0),
                       "cheque": r(x.cheque, 0), "high": r(x.high, 3), "low": r(x.low, 3)}
                      for s, x in summary.iterrows()],
