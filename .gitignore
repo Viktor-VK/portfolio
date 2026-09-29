@@ -10,3 +10,9 @@ __pycache__/
 
 # черновые ноутбуки
 sandbox_*.ipynb
+
+# исходный файл открытых данных для генератора синтетики (11 МБ, скачивается с grls.rosminzdrav.ru)
+synthetic_data/raw/
+# база с синтетикой собирается локально: python synthetic_data/generate.py --scale full
+synthetic_data/*.duckdb
+synthetic_data/*.duckdb.wal
