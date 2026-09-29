@@ -116,6 +116,40 @@ def export_clustering(con):
     }
 
 
+# примеры иерархии товара «категория → подкатегория → юнит → товар» для страницы матрицы:
+# (МНН или подкатегория, лекформа или вид товара); первые два - одно вещество в разных формах
+HIERARCHY_EXAMPLES = [("Ибупрофен", "таблетки"), ("Ибупрофен", "суппозитории"), ("Амлодипин", "таблетки"),
+                      ("Подгузники и пеленки", "подгузники"), ("Витаминно-минеральные комплексы", "саше")]
+SUBCATEGORY_SHORT = {"Противовоспалительные и противоревматические": "Противовоспалительные"}
+
+
+def hierarchy_examples(con):
+    p = con.sql("""
+        SELECT p.apCode, p.category, p.subcategory, p.mnn, p.form_group, p.form_name, p.name, p.trade_name,
+               p.dosage, p.pack_qty, p.is_own_brand, COALESCE(s.revenue, 0) AS revenue
+        FROM pharmacy.products p
+        LEFT JOIN (SELECT apCode, SUM(Sum_Fact) AS revenue FROM pharmacy.cheques GROUP BY 1) s USING (apCode)
+        WHERE p.product_class <> 'Нетоварные позиции'
+    """).df()
+    rows = []
+    for key, form in HIERARCHY_EXAMPLES:
+        drug = p.mnn == key
+        g = p[(drug & (p.form_group == form)) | (~drug & (p.subcategory == key) & (p.form_name == form))]
+        if g.empty:
+            continue
+        # пример - самый продаваемый товар юнита обычного бренда (собственная марка сети выглядела бы как заглушка)
+        brands = g[~g.is_own_brand]
+        top = (brands if len(brands) else g).sort_values("revenue", ascending=False).iloc[0]
+        if pd.notna(top.mnn):
+            unit, product = f"{key}, {form}", f"{top.trade_name} {top.dosage} №{int(top.pack_qty)}".replace("  ", " ")
+        else:
+            unit = form[0].upper() + form[1:] if form.lower() in key.lower() else f"{key}, {form}"
+            product = top["name"].split(" (")[0] + (f" №{int(top.pack_qty)}" if top.pack_qty > 1 else "")
+        rows.append({"category": top.category, "subcategory": SUBCATEGORY_SHORT.get(top.subcategory, top.subcategory),
+                     "unit": unit, "n": int(len(g)), "product": product})
+    return rows
+
+
 def export_scoring(con):
     v = con.sql("SELECT * FROM results.scoring_variants").df()
     units = con.sql("SELECT * FROM results.scoring_units").df()
@@ -137,6 +171,7 @@ def export_scoring(con):
                       "d_stock": r(x.diff_stock_rub, 0), "d_revenue": r(x.diff_revenue, 0),
                       "d_profit": r(x.diff_profit, 0), "d_positions": int(round(x.diff_positions)),
                       "selected": bool(x.selected)} for x in v.itertuples()],
+        "hierarchy": hierarchy_examples(con),
         "experiment": [{"method": x.method, "groups": int(x.groups), "variant": x.variant,
                         "positions": int(round(x.positions)), "d_stock": r(x.d_stock, 0),
                         "d_profit_train": r(x.d_profit_train, 0), "d_revenue_test": r(x.d_revenue_test, 0),
