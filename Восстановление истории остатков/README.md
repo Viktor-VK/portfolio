@@ -1,5 +1,7 @@
 # Восстановление истории остатков по филиалам
 
+**Страница с графиками на сайте:** [viktor-vk.github.io/projects/stock-history](https://viktor-vk.github.io/projects/stock-history/)
+
 **Отрасль:** розничная сеть электроники и бытовой техники.
 
 ## Ситуация до этой работы
