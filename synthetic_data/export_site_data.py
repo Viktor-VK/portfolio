@@ -41,14 +41,18 @@ def export_clustering(con):
         SELECT s.*, a.archetype
         FROM results.store_segments s JOIN pharmacy.store_archetypes a USING (TradePointId)
     """).df()
-    period = con.sql("SELECT MIN(Date) AS f, MAX(Date) AS t FROM pharmacy.cheques").df().iloc[0]
-    funnel = con.sql("""
+    # кластеризация считается по первой половине периода чеков (вторая - отложенная проверка в скоринге)
+    full = con.sql("SELECT MIN(Date) AS f, MAX(Date) AS t FROM pharmacy.cheques").df().iloc[0]
+    train_days = ((pd.Timestamp(full.t) - pd.Timestamp(full.f)).days + 1) // 2
+    period = pd.Series({"f": pd.Timestamp(full.f), "t": pd.Timestamp(full.f) + pd.Timedelta(days=train_days - 1)})
+    funnel = con.execute("""
         SELECT COUNT(*) AS all_lines,
                COUNT(*) FILTER (WHERE c.SaleType NOT IN ('Опт', 'Маркетплейс')
                                   AND c.ShelfLifeMonths >= 6
                                   AND p.product_class <> 'Нетоварные позиции') AS kept_lines
         FROM pharmacy.cheques c JOIN pharmacy.products p USING (apCode)
-    """).df().iloc[0]
+        WHERE c.Date BETWEEN ? AND ?
+    """, [period.f, period.t]).df().iloc[0]
     n_stores_all = con.sql("SELECT COUNT(*) FROM pharmacy.stores").fetchone()[0]
     n_products = con.sql("SELECT COUNT(*) FROM pharmacy.products WHERE product_class <> 'Нетоварные позиции'").fetchone()[0]
     n_drugs = con.sql("SELECT COUNT(*) FROM pharmacy.products WHERE source LIKE 'ГРЛС%'").fetchone()[0]
