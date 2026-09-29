@@ -89,6 +89,9 @@ def export_clustering(con):
                    "n": [int(info.loc[c, "n_stores"]) for c in clusters],
                    "index": [[r(v, 2) for v in row] for row in pivot.to_numpy()]},
         "k_selection": k_selection,
+        "segments_raw": int(seg.segment_raw.nunique()),
+        "merges": [{"from": x.from_segment, "n": int(x.n_stores), "to": x.to_segment}
+                   for x in con.sql("SELECT * FROM results.segment_merges").df().itertuples()],
         "segments": [{"segment": s, "n": int(x.n), "square": r(x.square, 0), "revenue": r(x.revenue, 0),
                       "cheque": r(x.cheque, 0), "high": r(x.high, 3), "low": r(x.low, 3)}
                      for s, x in summary.iterrows()],
