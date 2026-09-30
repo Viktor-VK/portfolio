@@ -8,6 +8,7 @@
 Схемы базы:
     pharmacy     - аптечная сеть: товары, точки, чеки, остатки, текущая матрица (кластеризация и скоринг)
     electronics  - сеть электроники: данные 1С для восстановления истории остатков
+    supply       - цепь поставок сети электроники: поставщик -> склады -> магазины
     meta         - описание таблиц и параметры генерации
 """
 import argparse
@@ -19,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 import electronics
+import supply_chain
 import pharmacy_products
 import pharmacy_sales
 
@@ -28,10 +30,10 @@ SEED = 2026
 SCALES = {
     # dev: таблицы порядка тысячи строк, всё собирается за секунды
     "dev": dict(n_drugs=700, n_non_drugs=297, n_stores=40, days=3, cheque_frac=0.04, stock_max_rows=3000,
-                el_stores=5, el_products=8, el_days=30),
+                el_stores=5, el_products=8, el_days=30, sc_stores=12, sc_products=6, sc_days=92),
     # full: объём для финальных прогонов и графиков
     "full": dict(n_drugs=2500, n_non_drugs=700, n_stores=260, days=56, cheque_frac=0.2, stock_max_rows=None,
-                 el_stores=36, el_products=None, el_days=92),
+                 el_stores=36, el_products=None, el_days=92, sc_stores=30, sc_products=None, sc_days=92),
 }
 
 PHARMACY_PERIOD_START = pd.Timestamp("2026-03-02")
@@ -53,6 +55,14 @@ TABLE_DOCS = {
     "electronics.stock_now": "Текущий остаток на последний день периода: остаток, резервы, транзит.",
     "electronics.stock_daily_true": "Истинный остаток на начало каждого дня и истинный спрос покупателей из симуляции. "
                                     "Только для проверки восстановления и оценки упущенных продаж, в расчёте не используется.",
+    "supply.products": "Номенклатура: смартфоны Apple (названия реальные), модель, ассортиментный статус.",
+    "supply.branches": "Склады и магазины; привязка магазина к складу (синтетика).",
+    "supply.prices": "Цена продажи и себестоимость номенклатуры (условные).",
+    "supply.supplier_orders": "Заказы поставщику: еженедельный закуп по складам, заказано и подтверждено, дата поступления.",
+    "supply.journal": "Журнал движений по складам и магазинам: поступления, отгрузки в магазины, продажи.",
+    "supply.stock_now": "Текущий остаток складов и магазинов на последний день периода и товар в пути.",
+    "supply.truth_daily": "Истинный остаток на начало дня и спрос покупателей из симуляции - только для проверки.",
+    "supply.truth_events": "Проблемы, заложенные в симуляцию на каждом этапе цепочки - только для проверки разбора.",
     "pharmacy.store_archetypes": "Скрытый архетип, заложенный в точку при генерации. Только для проверки качества "
                                  "кластеризации, в расчётах не используется.",
 }
@@ -97,6 +107,14 @@ def generate_electronics(con, cfg):
     return {f"electronics.{k}": len(v) for k, v in tables.items()}
 
 
+def generate_supply(con, cfg):
+    t = time.time()
+    tables = supply_chain.generate(cfg["sc_stores"], cfg["sc_products"], cfg["sc_days"], seed=SEED)
+    to_duckdb(con, "supply", tables)
+    print(f"supply: {', '.join(f'{k} {len(v):,}' for k, v in tables.items())} ({time.time() - t:.0f} c)")
+    return {f"supply.{k}": len(v) for k, v in tables.items()}
+
+
 def write_meta(con, counts, scale):
     con.execute("CREATE SCHEMA IF NOT EXISTS meta")
     con.execute("""CREATE TABLE IF NOT EXISTS meta.tables (
@@ -109,7 +127,7 @@ def write_meta(con, counts, scale):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scale", choices=list(SCALES), default="dev")
-    ap.add_argument("--only", choices=["pharmacy", "electronics"])
+    ap.add_argument("--only", choices=["pharmacy", "electronics", "supply"])
     ap.add_argument("--db", default=str(DB_PATH))
     args = ap.parse_args()
     cfg = SCALES[args.scale]
@@ -120,6 +138,8 @@ def main():
         counts.update(generate_pharmacy(con, cfg))
     if args.only in (None, "electronics"):
         counts.update(generate_electronics(con, cfg))
+    if args.only in (None, "supply"):
+        counts.update(generate_supply(con, cfg))
     write_meta(con, counts, args.scale)
     con.execute("CHECKPOINT")
     con.close()

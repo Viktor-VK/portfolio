@@ -223,6 +223,97 @@ def export_stock(con):
     }
 
 
+def zero_heatmap(dd, period_from):
+    """Дни дефицита «магазин - товар - день» за неделю (весь день без товара или закончился): склад -> магазины."""
+    start = pd.Timestamp(period_from)
+    d = dd.assign(week=dd.Дата - pd.to_timedelta(dd.Дата.dt.dayofweek, unit="D"))
+    pos = d.groupby(["Склад", "Магазин", "week"]).size().unstack("week", fill_value=0)
+    weeks = sorted(pos.columns)
+    wh = pos.groupby(level="Склад").sum()
+    wh = wh.loc[wh.sum(axis=1).sort_values(ascending=False).index]
+    return {"weeks": [max(w, start).strftime("%d.%m") for w in weeks],
+            "warehouses": [{"name": w, "values": wh.loc[w, weeks].astype(int).tolist(),
+                            "stores": [{"name": m, "values": row[weeks].astype(int).tolist()}
+                                       for m, row in pos.loc[w].loc[lambda x: x.sum(axis=1).sort_values(ascending=False).index]
+                                       .iterrows()]}
+                           for w in wh.index]}
+
+
+def launch_stats(con, dd):
+    """Вклад старта продаж новинок: потери, пиковая неделя, причины, доля от продаж против основного ассортимента."""
+    st = con.sql("SELECT ТоварСсылка, Ассортиментный_Статус, Модель FROM supply.products").df().set_index("ТоварСсылка")
+    d = dd.assign(status=dd.Номенклатура.map(st.Ассортиментный_Статус), model=dd.Номенклатура.map(st.Модель))
+    sales = con.sql("""SELECT p.Ассортиментный_Статус AS status, SUM(j.Количество * c.ЦенаПродажи) AS rub
+                       FROM supply.journal j JOIN supply.products p ON p.ТоварСсылка = j.Номенклатура
+                       JOIN supply.prices c ON c.Номенклатура = j.Номенклатура
+                       WHERE j.Операция = 'Продажа' GROUP BY 1""").df().set_index("status").rub
+    new = d[d.status == "Новинка"]
+    week = d.groupby("week").Упущено_руб.sum()
+    peak = week.idxmax()
+    causes = new.groupby("Итог").Упущено_руб.sum().sort_values(ascending=False)
+    base = d[d.status == "Основной"]
+    return {"lost": r(new.Упущено_руб.sum(), 0), "first_sale": str(new.Дата.min().date()),
+            "weeks": int(new.week.nunique()),
+            "loss_rate": r(new.Упущено_руб.sum() / sales["Новинка"], 4),
+            "base_loss_rate": r(base.Упущено_руб.sum() / sales["Основной"], 4),
+            "peak_week": str(peak.date()), "peak_lost": r(week[peak], 0),
+            "peak_new": r(new.loc[new.week == peak, "Упущено_руб"].sum(), 0),
+            "soldout": r(new.loc[new.Вид == "закончился за день", "Упущено_руб"].sum(), 0),
+            "causes": [{"outcome": k, "lost": r(v, 0)} for k, v in causes.items()],
+            "top_model": new.groupby("model").Упущено_руб.sum().idxmax(),
+            "top_model_lost": r(new.groupby("model").Упущено_руб.sum().max(), 0)}
+
+
+def export_supply(con):
+    s = con.sql("SELECT * FROM results.supply_summary").df().set_index("metric").value
+    num = lambda k, d=4: r(float(s[k]), d)
+    dd = con.sql("SELECT * FROM results.supply_deficits").df()
+    daily = con.sql("SELECT * FROM results.supply_example_daily ORDER BY warehouse, date").df()
+    orders = con.sql("SELECT * FROM results.supply_example_orders ORDER BY date").df()
+    cover = con.sql("SELECT * FROM results.supply_cover").df()
+
+    # потери по итогам разбора и видам дефицита
+    stage_of = dd.drop_duplicates("Итог").set_index("Итог").Этап
+    cause = dd.pivot_table(index="Итог", columns="Вид", values="Упущено_руб", aggfunc="sum", fill_value=0)
+    cause = cause.loc[cause.sum(axis=1).sort_values(ascending=False).index]
+    # по неделям (с понедельника) и этапам
+    dd["week"] = dd.Дата - pd.to_timedelta(dd.Дата.dt.dayofweek, unit="D")
+    wk = dd.pivot_table(index="week", columns="Этап", values="Упущено_руб", aggfunc="sum", fill_value=0).sort_index()
+    wh = dd.pivot_table(index="Склад", columns="Этап", values="Упущено_руб", aggfunc="sum", fill_value=0)
+    wh = wh.loc[wh.sum(axis=1).sort_values(ascending=False).index]
+    stages = ["Распределение", "Закуп", "Поставщик"]
+
+    return {
+        "meta": {"period_from": s["period_from"], "period_to": s["period_to"], "warehouses": int(s["warehouses"]),
+                 "stores": int(s["stores"]), "skus": int(s["skus"]), "orders": int(s["orders"]),
+                 "journal_rows": int(s["journal_rows"]), "match_share": num("match_share"),
+                 "max_abs_diff": int(float(s["max_abs_diff"])), "days_active": int(s["days_active"]),
+                 "days_empty": int(s["days_empty"]), "days_soldout": int(s["days_soldout"]),
+                 "sales": num("sales_rub", 0), "lost_est": num("lost_est", 0), "lost_true": num("lost_true", 0),
+                 "hit": num("hit", 3), "store_cover_days": num("store_cover_days", 2), "wh_cover_days": num("wh_cover_days", 2),
+                 "soldout_lost": num("soldout_lost", 0), "soldout_dist_share": num("soldout_dist_share", 3),
+                 "buy_err": num("buy_err", 0), "buy_err_systemic_share": num("buy_err_systemic_share", 3),
+                 "example_sku": s["example_sku"]},
+        "causes": [{"outcome": k, "stage": stage_of[k], "empty": r(row.get("весь день без товара", 0), 0),
+                    "soldout": r(row.get("закончился за день", 0), 0)} for k, row in cause.iterrows()],
+        "weekly": {"weeks": [str(d.date()) for d in wk.index],
+                   **{st: [r(v, 0) for v in wk.get(st, pd.Series(0, index=wk.index))] for st in stages}},
+        "cover": {lvl: [{"group": x.группа, "pairs": int(x.пар), "deficit": r(x.доля_дней_дефицита, 4),
+                         "share": r(x.доля_пар, 4)} for x in g.itertuples() if x.пар > 0]
+                  for lvl, g in cover.groupby("уровень")},
+        "heatmap": zero_heatmap(dd, s["period_from"]),
+        "launch": launch_stats(con, dd),
+        "by_warehouse": [{"warehouse": k, **{st: r(row.get(st, 0), 0) for st in stages}} for k, row in wh.iterrows()],
+        "example": {"sku": s["example_sku"],
+                    "dates": [str(pd.Timestamp(d).date()) for d in sorted(daily.date.unique())],
+                    "warehouses": {w: {"stock": g.stock.astype(int).tolist(),
+                                       "deficit": g.deficit_stores.astype(int).tolist()}
+                                   for w, g in daily.groupby("warehouse", sort=False)},
+                    "orders": [[str(pd.Timestamp(x.date).date()), int(x.ordered), int(x.confirmed)]
+                               for x in orders.itertuples()]},
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=str(DB_PATH))
@@ -233,7 +324,8 @@ def main():
 
     con = duckdb.connect(args.db, read_only=True)
     payloads = {"store-clustering.json": export_clustering(con), "assortment-matrix.json": export_scoring(con),
-                "stock-history.json": export_stock(con)}
+                "stock-history.json": export_stock(con),
+                "supply-chain.json": export_supply(con)}
     con.close()
     for name, payload in payloads.items():
         path = out / name
