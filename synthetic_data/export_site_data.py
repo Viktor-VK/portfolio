@@ -116,51 +116,39 @@ def export_clustering(con):
     }
 
 
-# примеры иерархии товара «категория → подкатегория → юнит → товар» для страницы матрицы:
-# (МНН или подкатегория, лекформа или вид товара); первые два - одно вещество в разных формах
-HIERARCHY_EXAMPLES = [("Ибупрофен", "таблетки"), ("Ибупрофен", "суппозитории"), ("Амлодипин", "таблетки"),
+# Примеры для цепочки «категория → подкатегория → юнит → товар» на странице матрицы: (МНН или подкатегория, форма
+# юнита или вид товара). Юниты берутся из справочника results.product_units, который пишет ноутбук скоринга.
+HIERARCHY_EXAMPLES = [("Ибупрофен", "таблетки"), ("Ибупрофен", "сироп, суспензия, раствор внутрь"), ("Амлодипин", "таблетки"),
                       ("Подгузники и пеленки", "подгузники"), ("Витаминно-минеральные комплексы", "саше")]
 SUBCATEGORY_SHORT = {"Противовоспалительные и противоревматические": "Противовоспалительные"}
-PACK_BINS = [(1, "1"), (4, "2-4"), (8, "5-8"), (12, "9-12"), (20, "13-20"), (30, "21-30"),
-             (50, "31-50"), (100, "51-100"), (float("inf"), "100+")]
-
-
-def pack_bin(doses):
-    """Категория фасовки по числу доз в упаковке (те же границы, что в ноутбуках); у нештучных форм - None."""
-    if doses is None or pd.isna(doses):
-        return None
-    return next(label for upper, label in PACK_BINS if doses <= upper)
 
 
 def hierarchy_examples(con):
     p = con.sql("""
-        SELECT p.apCode, p.category, p.subcategory, p.mnn, p.form_group, p.form_name, p.name, p.trade_name,
-               p.dosage, p.pack_qty, p.doses_in_pack, p.is_own_brand, COALESCE(s.revenue, 0) AS revenue
+        SELECT p.apCode, p.category, p.subcategory, p.mnn, p.form_name, p.name, p.trade_name, p.dosage, p.pack_qty,
+               p.is_own_brand, u.unit_form, u.Unit, COALESCE(s.revenue, 0) AS revenue
         FROM pharmacy.products p
+        JOIN results.product_units u USING (apCode)
         LEFT JOIN (SELECT apCode, SUM(Sum_Fact) AS revenue FROM pharmacy.cheques GROUP BY 1) s USING (apCode)
-        WHERE p.product_class <> 'Нетоварные позиции'
     """).df()
+    size = p.Unit.value_counts()
     rows = []
     for key, form in HIERARCHY_EXAMPLES:
         drug = p.mnn == key
-        g = p[(drug & (p.form_group == form)) | (~drug & (p.subcategory == key) & (p.form_name == form))]
+        g = p[(drug & (p.unit_form == form)) | (~drug & (p.subcategory == key) & (p.form_name == form))]
         if g.empty:
             continue
-        # пример - самый продаваемый товар юнита обычного бренда (собственная марка сети выглядела бы как заглушка)
+        # пример - самый продаваемый товар обычного бренда (собственная марка сети выглядела бы как заглушка)
         brands = g[~g.is_own_brand]
         top = (brands if len(brands) else g).sort_values("revenue", ascending=False).iloc[0]
-        # юнит штучных форм делится ещё и по объёму пачки (как в ноутбуке скоринга)
-        pack = pack_bin(top.doses_in_pack)
-        if pack:
-            g = g[g.doses_in_pack.map(pack_bin) == pack]
         if pd.notna(top.mnn):
-            unit = f"{key}, {form}" + (f", {pack} шт." if pack else "")
-            product = f"{top.trade_name} {top.dosage} №{int(top.pack_qty)}".replace("  ", " ")
+            unit = top.Unit
+            product = (f"{top.trade_name} {top.dosage}" + (f" №{int(top.pack_qty)}" if top.pack_qty > 1 else "")).replace("  ", " ")
         else:
-            unit = (form[0].upper() + form[1:] if form.lower() in key.lower() else f"{key}, {form}") + (f", {pack} шт." if pack else "")
+            unit = top.Unit.replace(f"{key}, {form}", form[0].upper() + form[1:]) if form.lower() in key.lower() else top.Unit
             product = top["name"].split(" (")[0] + (f" №{int(top.pack_qty)}" if top.pack_qty > 1 else "")
         rows.append({"category": top.category, "subcategory": SUBCATEGORY_SHORT.get(top.subcategory, top.subcategory),
-                     "unit": unit, "n": int(len(g)), "product": product})
+                     "unit": unit, "n": int(size[top.Unit]), "product": product})
     return rows
 
 
