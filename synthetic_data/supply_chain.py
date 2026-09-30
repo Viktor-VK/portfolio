@@ -13,10 +13,52 @@
 магазина и перезатарка отдельных магазинов. Ноутбук должен найти их по «учётным» таблицам - заказам
 поставщику, журналу движений и текущему остатку, - истина используется только для проверки.
 """
+import uuid
+
 import numpy as np
 import pandas as pd
 
-from electronics import NEW_LINE_RELEASE, PERIOD_START, _ref, build_products
+PERIOD_START = pd.Timestamp("2025-08-01")
+NEW_LINE_RELEASE = pd.Timestamp("2025-09-26")  # поступление новой линейки в продажу
+
+# модель: (статус, цена за базовую память, варианты памяти и надбавки, цвета, относительный спрос)
+CATALOG = {
+    "iPhone 15": ("Выводимый", 62000, {"128GB": 0, "256GB": 9000}, ["Black", "Blue", "Pink"], 0.8),
+    "iPhone 15 Plus": ("Выводимый", 70000, {"128GB": 0}, ["Black", "Green"], 0.35),
+    "iPhone 16e": ("Основной", 56000, {"128GB": 0, "256GB": 10000}, ["Black", "White"], 0.9),
+    "iPhone 16": ("Основной", 76000, {"128GB": 0, "256GB": 10000, "512GB": 29000}, ["Black", "White", "Ultramarine"], 1.4),
+    "iPhone 16 Plus": ("Основной", 86000, {"128GB": 0, "256GB": 10000}, ["Black", "Teal"], 0.45),
+    "iPhone 16 Pro": ("Основной", 101000, {"128GB": 0, "256GB": 11000, "512GB": 30000}, ["Black Titanium", "Desert Titanium"], 1.0),
+    "iPhone 16 Pro Max": ("Основной", 121000, {"256GB": 0, "512GB": 20000}, ["Black Titanium", "Desert Titanium"], 0.9),
+    "iPhone 17": ("Новинка", 92000, {"256GB": 0, "512GB": 20000}, ["Black", "Lavender", "Sage"], 1.5),
+    "iPhone Air": ("Новинка", 117000, {"256GB": 0, "512GB": 20000}, ["Space Black", "Sky Blue"], 0.6),
+    "iPhone 17 Pro": ("Новинка", 127000, {"256GB": 0, "512GB": 20000, "1TB": 50000}, ["Cosmic Orange", "Deep Blue", "Silver"], 1.3),
+    "iPhone 17 Pro Max": ("Новинка", 142000, {"256GB": 0, "512GB": 20000, "1TB": 50000}, ["Cosmic Orange", "Deep Blue"], 1.2),
+}
+
+
+def _ref(rng):
+    """Ссылка в стиле 1С - GUID."""
+    return str(uuid.UUID(int=int(rng.integers(0, 2 ** 63)) << 64 | int(rng.integers(0, 2 ** 63))))
+
+
+def build_products(n_max, rng):
+    rows = []
+    for model, (status, base, mem, colors, pop) in CATALOG.items():
+        for m, extra in mem.items():
+            for c in colors:
+                # у старших объёмов памяти спрос ниже
+                rows.append(dict(model=model, Товар=f"Смартфон Apple {model} {m} {c}", Ассортиментный_Статус=status,
+                                 price=base + extra, pop=pop * (0.55 if extra >= 20000 else 1.0) * rng.lognormal(0, 0.25)))
+    p = pd.DataFrame(rows)
+    if n_max and len(p) > n_max:
+        p = p.sort_values("pop", ascending=False).head(n_max)
+    p = p.reset_index(drop=True)
+    p["ТоварСсылка"] = [_ref(rng) for _ in range(len(p))]
+    p["Код"] = [f"{5_100_000 + i * 17}" for i in range(len(p))]
+    p["Категория1"], p["Категория2"], p["Категория3"] = "Смартфоны и гаджеты", "Смартфоны", "Смартфоны по брендам"
+    p["Категория4"] = "Apple Смартфоны"
+    return p
 
 LEAD_SUPPLIER = 2   # дней от поставщика до склада
 LEAD_STORE = 1      # дней от склада до магазина

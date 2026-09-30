@@ -7,7 +7,6 @@
 
 Схемы базы:
     pharmacy     - аптечная сеть: товары, точки, чеки, остатки, текущая матрица (кластеризация и скоринг)
-    electronics  - сеть электроники: данные 1С для восстановления истории остатков
     supply       - цепь поставок сети электроники: поставщик -> склады -> магазины
     meta         - описание таблиц и параметры генерации
 """
@@ -19,7 +18,6 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-import electronics
 import supply_chain
 import pharmacy_products
 import pharmacy_sales
@@ -30,10 +28,10 @@ SEED = 2026
 SCALES = {
     # dev: таблицы порядка тысячи строк, всё собирается за секунды
     "dev": dict(n_drugs=700, n_non_drugs=297, n_stores=40, days=3, cheque_frac=0.04, stock_max_rows=3000,
-                el_stores=5, el_products=8, el_days=30, sc_stores=12, sc_products=6, sc_days=92),
+                sc_stores=12, sc_products=6, sc_days=92),
     # full: объём для финальных прогонов и графиков
     "full": dict(n_drugs=2500, n_non_drugs=700, n_stores=260, days=56, cheque_frac=0.2, stock_max_rows=None,
-                 el_stores=36, el_products=None, el_days=92, sc_stores=30, sc_products=None, sc_days=92),
+                 sc_stores=30, sc_products=None, sc_days=92),
 }
 
 PHARMACY_PERIOD_START = pd.Timestamp("2026-03-02")
@@ -46,15 +44,6 @@ TABLE_DOCS = {
                         "по закупке, тип продажи, остаточный срок годности.",
     "pharmacy.stock": "Снимок остатков по точкам на конец периода (синтетика).",
     "pharmacy.matrix_fact": "Действующая ассортиментная матрица сети по текущей категории точки A-E (синтетика).",
-    "electronics.products": "Справочник номенклатуры 1С: смартфоны Apple (названия моделей реальные), иерархия "
-                            "категорий, ассортиментный статус.",
-    "electronics.branches": "Филиалы: магазины, дисконт-центры, РРЦ, склад, офис; привязка магазина к РРЦ (синтетика).",
-    "electronics.prices": "Виды цен номенклатуры (ФЦ ОРП, РФЦ обычная, РФЦ от себестоимости), часть не заполнена.",
-    "electronics.schet_41": "Движения товара (счёт 41) по дням: 0 - приход, 1 - расход; количество и сумма.",
-    "electronics.schet_90": "Реализация (счёт 90): продажи по дням в штуках и по себестоимости.",
-    "electronics.stock_now": "Текущий остаток на последний день периода: остаток, резервы, транзит.",
-    "electronics.stock_daily_true": "Истинный остаток на начало каждого дня и истинный спрос покупателей из симуляции. "
-                                    "Только для проверки восстановления и оценки упущенных продаж, в расчёте не используется.",
     "supply.products": "Номенклатура: смартфоны Apple (названия реальные), модель, ассортиментный статус.",
     "supply.branches": "Склады и магазины; привязка магазина к складу (синтетика).",
     "supply.prices": "Цена продажи и себестоимость номенклатуры (условные).",
@@ -99,13 +88,6 @@ def generate_pharmacy(con, cfg):
     return {f"pharmacy.{k}": len(v) for k, v in tables.items()}
 
 
-def generate_electronics(con, cfg):
-    t = time.time()
-    tables = electronics.generate(cfg["el_stores"], cfg["el_products"], cfg["el_days"], seed=SEED)
-    to_duckdb(con, "electronics", tables)
-    print(f"electronics: {', '.join(f'{k} {len(v):,}' for k, v in tables.items())} ({time.time() - t:.0f} c)")
-    return {f"electronics.{k}": len(v) for k, v in tables.items()}
-
 
 def generate_supply(con, cfg):
     t = time.time()
@@ -127,7 +109,7 @@ def write_meta(con, counts, scale):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scale", choices=list(SCALES), default="dev")
-    ap.add_argument("--only", choices=["pharmacy", "electronics", "supply"])
+    ap.add_argument("--only", choices=["pharmacy", "supply"])
     ap.add_argument("--db", default=str(DB_PATH))
     args = ap.parse_args()
     cfg = SCALES[args.scale]
@@ -136,8 +118,6 @@ def main():
     counts = {}
     if args.only in (None, "pharmacy"):
         counts.update(generate_pharmacy(con, cfg))
-    if args.only in (None, "electronics"):
-        counts.update(generate_electronics(con, cfg))
     if args.only in (None, "supply"):
         counts.update(generate_supply(con, cfg))
     write_meta(con, counts, args.scale)

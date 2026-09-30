@@ -194,35 +194,6 @@ def export_scoring(con):
     }
 
 
-def export_stock(con):
-    s = con.sql("SELECT * FROM results.stock_summary").df().set_index("metric").value
-    av = con.sql("SELECT * FROM results.stock_availability").df()
-    order = av.groupby("branch").share.mean().sort_values().index
-    dates = sorted(av.date.unique())
-    grid = av.pivot(index="branch", columns="date", values="share").loc[order, dates]
-    lines = con.sql("SELECT * FROM results.stock_lines ORDER BY date").df()
-    sku = con.sql("SELECT * FROM results.stock_sku_deficit ORDER BY deficit_share DESC").df()
-    lost = con.sql("SELECT * FROM results.stock_lost_by_branch ORDER BY lost_est DESC").df()
-    n_moves = con.sql("SELECT COUNT(*) FROM electronics.schet_41").fetchone()[0]
-
-    return {
-        "meta": {"period_from": s["period_from"], "period_to": s["period_to"], "rows": int(float(s["rows"])),
-                 "match_share": r(float(s["match_share"]), 4), "max_abs_diff": int(float(s["max_abs_diff"])),
-                 "availability": r(float(s["availability"]), 4), "sales": r(float(s["sales_rub"]), 0),
-                 "lost_est": r(float(s["lost_est_rub"]), 0), "lost_true": r(float(s["lost_true_rub"]), 0),
-                 "branches": int(float(s["branches"])), "skus": int(float(s["skus"])), "moves": int(n_moves),
-                 "lost_rank_corr": r(lost[["lost_est", "lost_true"]].corr("spearman").iloc[0, 1], 3)},
-        "availability": {"branches": list(order), "dates": [str(pd.Timestamp(d).date()) for d in dates],
-                         "share": [[r(v, 3) for v in row] for row in grid.to_numpy()]},
-        "lines": {name: {"dates": [str(pd.Timestamp(d).date()) for d in g.date], "stock": g.stock.astype(int).tolist(),
-                         "sales": g.sales.astype(int).tolist()} for name, g in lines.groupby("line")},
-        "sku": [{"sku": x.sku.replace("Смартфон Apple ", ""), "status": x.status, "deficit": r(x.deficit_share, 3)}
-                for x in sku.head(12).itertuples()],
-        "lost": [{"branch": x.branch, "est": r(x.lost_est, 0), "true": r(x.lost_true, 0), "sales": r(x.sales, 0)}
-                 for x in lost.itertuples()],
-    }
-
-
 def zero_heatmap(dd, period_from):
     """Дни дефицита «магазин - товар - день» за неделю (весь день без товара или закончился): склад -> магазины."""
     start = pd.Timestamp(period_from)
@@ -324,7 +295,6 @@ def main():
 
     con = duckdb.connect(args.db, read_only=True)
     payloads = {"store-clustering.json": export_clustering(con), "assortment-matrix.json": export_scoring(con),
-                "stock-history.json": export_stock(con),
                 "supply-chain.json": export_supply(con)}
     con.close()
     for name, payload in payloads.items():
