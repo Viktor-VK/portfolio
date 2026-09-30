@@ -163,7 +163,6 @@ def export_scoring(con):
     prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
     fr = con.sql("SELECT * FROM results.scoring_frontier ORDER BY method, lam").df()
     wk = con.sql("SELECT * FROM results.scoring_weekly ORDER BY method, week").df()
-    tx = con.sql("SELECT * FROM results.scoring_threshold_example").df()
 
     return {
         "meta": {"segments": int(units.segment.nunique()), "units": int(units.Unit.nunique()),
@@ -189,10 +188,6 @@ def export_scoring(con):
         "weekly": {m: {"lam": None if g.lam.isna().all() else r(g.lam.iloc[0], 3),
                        "rows": [[int(x.week), r(x.profit, 0), r(x.stock_rub, 0)] for x in g.itertuples()]}
                    for m, g in wk.groupby("method")},
-        # пример порога: юнит в двух сегментах - вес юнита, порог и доли товаров в юните
-        "threshold_example": [{"unit": u, "segment": seg, "weight": r(g.unit_weight.iloc[0], 3),
-                               "threshold": r(g.threshold.iloc[0], 3), "n": int(len(g)), "kept": int(g.kept.sum())}
-                              for (u, seg), g in tx.groupby(["Unit", "segment"], sort=False)],
         "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4)] for i, x in enumerate(u.itertuples())],
         "width": [{"segment": x.segment, "n_stores": int(x.n_stores), "fact": int(round(x.fact)), "new": int(x.new)}
                   for x in width.itertuples()],
