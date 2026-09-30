@@ -175,6 +175,7 @@ def export_scoring(con):
     exp = con.sql("SELECT * FROM results.scoring_experiment").df()
     prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
     fr = con.sql("SELECT * FROM results.scoring_frontier ORDER BY method, lam").df()
+    wk = con.sql("SELECT * FROM results.scoring_weekly ORDER BY method, week").df()
 
     return {
         "meta": {"segments": int(units.segment.nunique()), "units": int(units.Unit.nunique()),
@@ -196,6 +197,10 @@ def export_scoring(con):
                         "lam_zero_profit": r(x.lam_zero_profit, 3),
                         "d_profit_zero_stock": r(x.d_profit_zero_stock, 0), "lam_zero_stock": r(x.lam_zero_stock, 3)}
                        for x in exp.itertuples()],
+        # по неделям: матрица каждого способа выбрана по неделям обучения; [неделя, прибыль, остатки по нормативу]
+        "weekly": {m: {"lam": None if g.lam.isna().all() else r(g.lam.iloc[0], 3),
+                       "rows": [[int(x.week), r(x.profit, 0), r(x.stock_rub, 0)] for x in g.itertuples()]}
+                   for m, g in wk.groupby("method")},
         "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4), x.Status] for i, x in enumerate(u.itertuples())],
         "classes": [{"segment": s, "A": int(x.get("A", 0)), "B": int(x.get("B", 0)), "C": int(x.get("C", 0))}
                     for s, x in classes.loc[width.segment].iterrows()],
