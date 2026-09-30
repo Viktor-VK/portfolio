@@ -229,6 +229,7 @@ def export_supply(con):
     dd = con.sql("SELECT * FROM results.supply_deficits").df()
     daily = con.sql("SELECT * FROM results.supply_example_daily ORDER BY warehouse, date").df()
     orders = con.sql("SELECT * FROM results.supply_example_orders ORDER BY date").df()
+    cover = con.sql("SELECT * FROM results.supply_cover").df()
 
     # потери по итогам разбора и видам дефицита
     stage_of = dd.drop_duplicates("Итог").set_index("Итог").Этап
@@ -248,7 +249,7 @@ def export_supply(con):
                  "max_abs_diff": int(float(s["max_abs_diff"])), "days_active": int(s["days_active"]),
                  "days_empty": int(s["days_empty"]), "days_soldout": int(s["days_soldout"]),
                  "sales": num("sales_rub", 0), "lost_est": num("lost_est", 0), "lost_true": num("lost_true", 0),
-                 "hit": num("hit", 3), "store_cover_days": num("store_cover_days", 2),
+                 "hit": num("hit", 3), "store_cover_days": num("store_cover_days", 2), "wh_cover_days": num("wh_cover_days", 2),
                  "soldout_lost": num("soldout_lost", 0), "soldout_dist_share": num("soldout_dist_share", 3),
                  "buy_err": num("buy_err", 0), "buy_err_systemic_share": num("buy_err_systemic_share", 3),
                  "example_sku": s["example_sku"]},
@@ -256,6 +257,9 @@ def export_supply(con):
                     "soldout": r(row.get("закончился за день", 0), 0)} for k, row in cause.iterrows()],
         "weekly": {"weeks": [str(d.date()) for d in wk.index],
                    **{st: [r(v, 0) for v in wk.get(st, pd.Series(0, index=wk.index))] for st in stages}},
+        "cover": {lvl: [{"group": x.группа, "pairs": int(x.пар), "deficit": r(x.доля_дней_дефицита, 4),
+                         "share": r(x.доля_пар, 4)} for x in g.itertuples() if x.пар > 0]
+                  for lvl, g in cover.groupby("уровень")},
         "by_warehouse": [{"warehouse": k, **{st: r(row.get(st, 0), 0) for st in stages}} for k, row in wh.iterrows()],
         "example": {"sku": s["example_sku"],
                     "dates": [str(pd.Timestamp(d).date()) for d in sorted(daily.date.unique())],
