@@ -239,6 +239,31 @@ def zero_heatmap(dd, period_from):
                            for w in wh.index]}
 
 
+def launch_stats(con, dd):
+    """Вклад старта продаж новинок: потери, пиковая неделя, причины, доля от продаж против основного ассортимента."""
+    st = con.sql("SELECT ТоварСсылка, Ассортиментный_Статус, Модель FROM supply.products").df().set_index("ТоварСсылка")
+    d = dd.assign(status=dd.Номенклатура.map(st.Ассортиментный_Статус), model=dd.Номенклатура.map(st.Модель))
+    sales = con.sql("""SELECT p.Ассортиментный_Статус AS status, SUM(j.Количество * c.ЦенаПродажи) AS rub
+                       FROM supply.journal j JOIN supply.products p ON p.ТоварСсылка = j.Номенклатура
+                       JOIN supply.prices c ON c.Номенклатура = j.Номенклатура
+                       WHERE j.Операция = 'Продажа' GROUP BY 1""").df().set_index("status").rub
+    new = d[d.status == "Новинка"]
+    week = d.groupby("week").Упущено_руб.sum()
+    peak = week.idxmax()
+    causes = new.groupby("Итог").Упущено_руб.sum().sort_values(ascending=False)
+    base = d[d.status == "Основной"]
+    return {"lost": r(new.Упущено_руб.sum(), 0), "first_sale": str(new.Дата.min().date()),
+            "weeks": int(new.week.nunique()),
+            "loss_rate": r(new.Упущено_руб.sum() / sales["Новинка"], 4),
+            "base_loss_rate": r(base.Упущено_руб.sum() / sales["Основной"], 4),
+            "peak_week": str(peak.date()), "peak_lost": r(week[peak], 0),
+            "peak_new": r(new.loc[new.week == peak, "Упущено_руб"].sum(), 0),
+            "soldout": r(new.loc[new.Вид == "закончился за день", "Упущено_руб"].sum(), 0),
+            "causes": [{"outcome": k, "lost": r(v, 0)} for k, v in causes.items()],
+            "top_model": new.groupby("model").Упущено_руб.sum().idxmax(),
+            "top_model_lost": r(new.groupby("model").Упущено_руб.sum().max(), 0)}
+
+
 def export_supply(con):
     s = con.sql("SELECT * FROM results.supply_summary").df().set_index("metric").value
     num = lambda k, d=4: r(float(s[k]), d)
@@ -277,6 +302,7 @@ def export_supply(con):
                          "share": r(x.доля_пар, 4)} for x in g.itertuples() if x.пар > 0]
                   for lvl, g in cover.groupby("уровень")},
         "heatmap": zero_heatmap(dd, s["period_from"]),
+        "launch": launch_stats(con, dd),
         "by_warehouse": [{"warehouse": k, **{st: r(row.get(st, 0), 0) for st in stages}} for k, row in wh.iterrows()],
         "example": {"sku": s["example_sku"],
                     "dates": [str(pd.Timestamp(d).date()) for d in sorted(daily.date.unique())],
