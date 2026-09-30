@@ -223,6 +223,22 @@ def export_stock(con):
     }
 
 
+def zero_heatmap(dd, period_from):
+    """Дни дефицита «магазин - товар - день» за неделю (весь день без товара или закончился): склад -> магазины."""
+    start = pd.Timestamp(period_from)
+    d = dd.assign(week=dd.Дата - pd.to_timedelta(dd.Дата.dt.dayofweek, unit="D"))
+    pos = d.groupby(["Склад", "Магазин", "week"]).size().unstack("week", fill_value=0)
+    weeks = sorted(pos.columns)
+    wh = pos.groupby(level="Склад").sum()
+    wh = wh.loc[wh.sum(axis=1).sort_values(ascending=False).index]
+    return {"weeks": [max(w, start).strftime("%d.%m") for w in weeks],
+            "warehouses": [{"name": w, "values": wh.loc[w, weeks].astype(int).tolist(),
+                            "stores": [{"name": m, "values": row[weeks].astype(int).tolist()}
+                                       for m, row in pos.loc[w].loc[lambda x: x.sum(axis=1).sort_values(ascending=False).index]
+                                       .iterrows()]}
+                           for w in wh.index]}
+
+
 def export_supply(con):
     s = con.sql("SELECT * FROM results.supply_summary").df().set_index("metric").value
     num = lambda k, d=4: r(float(s[k]), d)
@@ -260,6 +276,7 @@ def export_supply(con):
         "cover": {lvl: [{"group": x.группа, "pairs": int(x.пар), "deficit": r(x.доля_дней_дефицита, 4),
                          "share": r(x.доля_пар, 4)} for x in g.itertuples() if x.пар > 0]
                   for lvl, g in cover.groupby("уровень")},
+        "heatmap": zero_heatmap(dd, s["period_from"]),
         "by_warehouse": [{"warehouse": k, **{st: r(row.get(st, 0), 0) for st in stages}} for k, row in wh.iterrows()],
         "example": {"sku": s["example_sku"],
                     "dates": [str(pd.Timestamp(d).date()) for d in sorted(daily.date.unique())],
