@@ -170,7 +170,6 @@ def export_scoring(con):
     width = con.sql("SELECT * FROM results.scoring_width").df().sort_values("n_stores", ascending=False)
     biggest = width.iloc[0].segment
     u = units[units.segment == biggest].sort_values("cum_share").reset_index(drop=True)
-    classes = units.groupby("segment").Status.value_counts().unstack().fillna(0)
 
     exp = con.sql("SELECT * FROM results.scoring_experiment").df()
     prm = con.sql("SELECT * FROM results.scoring_params").df().set_index("param").value
@@ -201,9 +200,7 @@ def export_scoring(con):
         "weekly": {m: {"lam": None if g.lam.isna().all() else r(g.lam.iloc[0], 3),
                        "rows": [[int(x.week), r(x.profit, 0), r(x.stock_rub, 0)] for x in g.itertuples()]}
                    for m, g in wk.groupby("method")},
-        "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4), x.Status] for i, x in enumerate(u.itertuples())],
-        "classes": [{"segment": s, "A": int(x.get("A", 0)), "B": int(x.get("B", 0)), "C": int(x.get("C", 0))}
-                    for s, x in classes.loc[width.segment].iterrows()],
+        "pareto": [[r((i + 1) / len(u), 4), r(x.cum_share, 4)] for i, x in enumerate(u.itertuples())],
         "width": [{"segment": x.segment, "n_stores": int(x.n_stores), "fact": int(round(x.fact)), "new": int(x.new)}
                   for x in width.itertuples()],
     }
