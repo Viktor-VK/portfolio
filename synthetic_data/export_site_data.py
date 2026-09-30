@@ -223,6 +223,50 @@ def export_stock(con):
     }
 
 
+def export_supply(con):
+    s = con.sql("SELECT * FROM results.supply_summary").df().set_index("metric").value
+    num = lambda k, d=4: r(float(s[k]), d)
+    dd = con.sql("SELECT * FROM results.supply_deficits").df()
+    daily = con.sql("SELECT * FROM results.supply_example_daily ORDER BY warehouse, date").df()
+    orders = con.sql("SELECT * FROM results.supply_example_orders ORDER BY date").df()
+
+    # потери по итогам разбора и видам дефицита
+    stage_of = dd.drop_duplicates("Итог").set_index("Итог").Этап
+    cause = dd.pivot_table(index="Итог", columns="Вид", values="Упущено_руб", aggfunc="sum", fill_value=0)
+    cause = cause.loc[cause.sum(axis=1).sort_values(ascending=False).index]
+    # по неделям (с понедельника) и этапам
+    dd["week"] = dd.Дата - pd.to_timedelta(dd.Дата.dt.dayofweek, unit="D")
+    wk = dd.pivot_table(index="week", columns="Этап", values="Упущено_руб", aggfunc="sum", fill_value=0).sort_index()
+    wh = dd.pivot_table(index="Склад", columns="Этап", values="Упущено_руб", aggfunc="sum", fill_value=0)
+    wh = wh.loc[wh.sum(axis=1).sort_values(ascending=False).index]
+    stages = ["Распределение", "Закуп", "Поставщик"]
+
+    return {
+        "meta": {"period_from": s["period_from"], "period_to": s["period_to"], "warehouses": int(s["warehouses"]),
+                 "stores": int(s["stores"]), "skus": int(s["skus"]), "orders": int(s["orders"]),
+                 "journal_rows": int(s["journal_rows"]), "match_share": num("match_share"),
+                 "max_abs_diff": int(float(s["max_abs_diff"])), "days_active": int(s["days_active"]),
+                 "days_empty": int(s["days_empty"]), "days_soldout": int(s["days_soldout"]),
+                 "sales": num("sales_rub", 0), "lost_est": num("lost_est", 0), "lost_true": num("lost_true", 0),
+                 "hit": num("hit", 3), "store_cover_days": num("store_cover_days", 2),
+                 "soldout_lost": num("soldout_lost", 0), "soldout_dist_share": num("soldout_dist_share", 3),
+                 "buy_err": num("buy_err", 0), "buy_err_systemic_share": num("buy_err_systemic_share", 3),
+                 "example_sku": s["example_sku"]},
+        "causes": [{"outcome": k, "stage": stage_of[k], "empty": r(row.get("весь день без товара", 0), 0),
+                    "soldout": r(row.get("закончился за день", 0), 0)} for k, row in cause.iterrows()],
+        "weekly": {"weeks": [str(d.date()) for d in wk.index],
+                   **{st: [r(v, 0) for v in wk.get(st, pd.Series(0, index=wk.index))] for st in stages}},
+        "by_warehouse": [{"warehouse": k, **{st: r(row.get(st, 0), 0) for st in stages}} for k, row in wh.iterrows()],
+        "example": {"sku": s["example_sku"],
+                    "dates": [str(pd.Timestamp(d).date()) for d in sorted(daily.date.unique())],
+                    "warehouses": {w: {"stock": g.stock.astype(int).tolist(),
+                                       "deficit": g.deficit_stores.astype(int).tolist()}
+                                   for w, g in daily.groupby("warehouse", sort=False)},
+                    "orders": [[str(pd.Timestamp(x.date).date()), int(x.ordered), int(x.confirmed)]
+                               for x in orders.itertuples()]},
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=str(DB_PATH))
@@ -233,7 +277,8 @@ def main():
 
     con = duckdb.connect(args.db, read_only=True)
     payloads = {"store-clustering.json": export_clustering(con), "assortment-matrix.json": export_scoring(con),
-                "stock-history.json": export_stock(con)}
+                "stock-history.json": export_stock(con),
+                "supply-chain.json": export_supply(con)}
     con.close()
     for name, payload in payloads.items():
         path = out / name
